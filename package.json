@@ -1,0 +1,26 @@
+{
+  "name": "amex-house",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "engines": {
+    "node": "22.x",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run audit && npm run check:production && npm run check:final && node ./node_modules/vite/bin/vite.js build && node scripts/check-build.mjs",
+    "preview": "vite preview",
+    "audit": "node scripts/audit.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check:production": "node scripts/check-production.mjs",
+    "check:final": "node scripts/final-check.mjs",
+    "check:repository": "node scripts/check-repository.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.57.4",
+    "react": "19.2.1",
+    "react-dom": "19.2.1",
+    "vite": "8.0.16"
+  }
+}

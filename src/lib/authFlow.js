@@ -1,0 +1,3 @@
+export function readAuthFlow(){try{const url=new URL(location.href),type=url.searchParams.get('flow')||'',error=url.searchParams.get('error_description')||'';if(error)url.searchParams.delete('error_description');if(error)history.replaceState(null,'',`${url.pathname}${url.search}${url.hash}`);return{type:['recovery','email'].includes(type)?type:'',error}}catch{return{type:'',error:''}}}
+export const authRedirect=type=>{const url=new URL('/',location.origin);url.searchParams.set('flow',type==='email'?'email':'recovery');return url.href};
+export const clearAuthFlow=()=>history.replaceState(null,'',`${location.pathname}#/portal`);
