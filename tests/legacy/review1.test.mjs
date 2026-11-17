@@ -1,0 +1,25 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync, existsSync } from "node:fs";
+const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
+const service = read("../src/services/platform.js"),
+  layout = read("../src/components/Layout.jsx"),
+  player = read("../src/components/VideoPlayer.jsx"),
+  app = read("../src/App.jsx"),
+  vercel = read("../vercel.json");
+test("saved table possui allowlist", () =>
+  assert.match(service, /\['favorites','watch_later'\]\.includes\(table\)/));
+test("currentUser trata exceção", () =>
+  assert.match(service, /currentUser\(\)\{try\{/));
+test("youtube api possui timeout", () => assert.match(player, /12000/));
+test("logout possui estado", () => assert.match(layout, /SAINDO\.\.\./));
+test("mobile informa rota atual", () =>
+  assert.match(layout, /aria-current=\{page===id\?'page':undefined\}/));
+test("busca participa do foco", () =>
+  assert.match(app, /searchLessons\(scoped\.lessons,query\)/));
+test("CSP configurada", () => assert.match(vercel, /Content-Security-Policy/));
+test("Toast morto removido", () =>
+  assert.equal(
+    existsSync(new URL("../src/components/Toast.jsx", import.meta.url)),
+    false,
+  ));
