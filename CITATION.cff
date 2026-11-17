@@ -1,9 +1,9 @@
-cff-version: 1.0.0
+cff-version: 1.20.0
 title: AMEX HOUSE
 message: Cite este projeto acadêmico pela autoria abaixo.
 type: software
 authors:
   - family-names: Engane
     given-names: Kauã Felipe
-version: 1.0.0
+version: 1.20.0
 date-released: 2026-11-18

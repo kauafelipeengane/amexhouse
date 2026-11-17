@@ -1,4 +1,4 @@
-# Política# Política de Segurança
+# Política de Segurança
 
 ## Dados que não podem ser publicados
 

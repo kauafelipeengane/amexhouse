@@ -5,7 +5,6 @@ Plataforma web acadêmica para as formações AMEX Pentest e AMEX Python, com au
 ## Autor
 
 Kauã Felipe Engane
-José Eduardo Honório
 
 ## Disciplina
 
@@ -48,4 +47,4 @@ Consulte a pasta `docs/` para arquitetura, configuração, testes, implantação
 
 ### Versionamento local
 
-A linha pública começa em **AMEX HOUSE V1** (`1.0.0`). Cada melhoria aprovada incrementa a versão seguindo SemVer. O Git é usado localmente para commits e histórico; o deploy pode ser enviado diretamente à Vercel e ao Supabase, sem GitHub.
+A linha pública começa em **AMEX HOUSE V1.0.1** (`1.0.1`). Cada melhoria aprovada incrementa a versão seguindo SemVer. O Git é usado localmente para commits e histórico; o deploy pode ser enviado diretamente à Vercel e ao Supabase, sem GitHub.
