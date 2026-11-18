@@ -1,0 +1,998 @@
+import { reportClientError } from '../lib/errorReporter';
+import { MotionAnimatedNumber } from '../components/ui/MotionAnimatedNumber';
+import { Progress as ProgressBar } from '../components/ui/ShadcnProgress';
+import { academyConfig } from '../lib/academy';
+import React, { useEffect, useState } from 'react';
+import { Page, Empty, Metric, Row } from '../components/ui';
+import { asArray, formatDate, storage, safeNumber, safePercent, validDate } from '../lib/utils';
+import { deleteNote, saveNote, saveStudyGoal } from '../services/platform';
+import { readPreferences, savePreferences } from '../lib/preferences';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+export function Notes({ data, refresh, academy }) {
+  const lessons = asArray(data.lessons),
+    notes = asArray(data.notes),
+    draftKey = `amex-note-draft:${academy || 'academy'}`,
+    [draft, setDraft] = useState(() => {
+      try {
+        return JSON.parse(storage.get(draftKey, '{}'));
+      } catch (error) {
+        reportClientError(error, { source: 'pages/Workspace.jsx' });
+        return {};
+      }
+    }),
+    [query, setQuery] = useState(''),
+    [status, setStatus] = useState(''),
+    [busy, setBusy] = useState(''),
+    [pendingDelete, setPendingDelete] = useState(null);
+  useEffect(() => {
+    if (!draft.title && !draft.content && !draft.lesson_id) {
+      storage.remove(draftKey);
+      return;
+    }
+    const timer = setTimeout(() => storage.set(draftKey, JSON.stringify(draft)), 500);
+    return () => clearTimeout(timer);
+  }, [draft, draftKey]);
+  const lessonById = new Map(lessons.map((lesson) => [lesson.id, lesson])),
+    filteredNotes = notes
+      .filter((note) => {
+        const lesson = lessonById.get(note.lesson_id),
+          term = String(query).trim().toLocaleLowerCase('pt-BR');
+        return (
+          !term ||
+          `${note.title} ${note.content} ${lesson?.title ?? ''} ${lesson?.module?.title ?? ''} ${lesson?.course?.title ?? ''}`
+            .toLocaleLowerCase('pt-BR')
+            .includes(term)
+        );
+      })
+      .sort(
+        (a, b) =>
+          (validDate(b.updated_at)?.getTime() ?? 0) - (validDate(a.updated_at)?.getTime() ?? 0),
+      );
+  function update(field, value) {
+    setDraft((current) => ({ ...current, [field]: value }));
+    setStatus('');
+  }
+  function edit(note) {
+    setDraft({
+      id: note.id,
+      lesson_id: note.lesson_id,
+      title: note.title,
+      content: note.content,
+      review: !!note.review,
+      archived: !!note.archived,
+    });
+    setStatus('Editando anotação existente.');
+    scrollTo({ top: 0, behavior: 'auto' });
+  }
+  function cancel() {
+    setDraft({});
+    storage.remove(draftKey);
+    setStatus('Edição cancelada.');
+  }
+  async function save() {
+    if (!draft.title?.trim() || !draft.lesson_id || busy) return;
+    setBusy('save');
+    setStatus('');
+    try {
+      const response = await saveNote(draft);
+      setStatus(response.error ?? (draft.id ? 'Anotação atualizada.' : 'Anotação salva.'));
+      if (!response.error) {
+        setDraft({});
+        storage.remove(draftKey);
+        await refresh(true);
+      }
+    } catch (error) {
+      reportClientError(error, { source: 'pages/Workspace.jsx' });
+      setStatus('Não foi possível salvar a anotação.');
+    } finally {
+      setBusy('');
+    }
+  }
+  function requestRemove(note) {
+    if (!busy) setPendingDelete(note);
+  }
+  async function remove() {
+    const note = pendingDelete;
+    if (busy || !note) return;
+    setBusy(note.id);
+    setStatus('');
+    try {
+      const response = await deleteNote(note.id);
+      setStatus(response.error ?? 'Anotação excluída.');
+      if (!response.error) {
+        if (draft.id === note.id) cancel();
+        await refresh(true);
+      }
+    } catch (error) {
+      reportClientError(error, { source: 'pages/Workspace.jsx' });
+      setStatus('Não foi possível excluir a anotação.');
+    } finally {
+      setBusy('');
+      setPendingDelete(null);
+    }
+  }
+  return (
+    <Page
+      eyebrow={academy === 'python' ? 'AMEX PYTHON' : 'AMEX PENTEST'}
+      title="Anotações da formação"
+    >
+      <p className="notes-intro">
+        Cada anotação fica vinculada a uma aula desta formação. Conteúdos sem vínculo acadêmico não
+        são exibidos aqui.
+      </p>
+      <section className="editor note-editor" aria-labelledby="note-editor-title">
+        <header>
+          <div>
+            <small>{draft.id ? 'Editar ANOTAÇÃO' : 'NOVA ANOTAÇÃO'}</small>
+            <h2 id="note-editor-title">
+              {draft.id ? 'Atualize seu registro' : 'Registre um aprendizado'}
+            </h2>
+          </div>
+          {draft.id && (
+            <button type="button" onClick={cancel}>
+              Cancelar EDIÇÃO
+            </button>
+          )}
+        </header>
+        <label htmlFor="note-lesson">
+          AULA
+          <select
+            id="note-lesson"
+            value={draft.lesson_id ?? ''}
+            onChange={(event) => update('lesson_id', event.target.value)}
+            required
+          >
+            <option value="">Selecione uma aula</option>
+            {lessons.map((lesson) => (
+              <option key={lesson.id} value={lesson.id}>
+                {lesson.course?.title} · {lesson.module?.title} · {lesson.title}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label htmlFor="note-title">
+          TÍTULO
+          <input
+            id="note-title"
+            maxLength="100"
+            value={draft.title ?? ''}
+            onChange={(event) => update('title', event.target.value)}
+          />
+          <small>{String(draft.title ?? '').length}/100</small>
+        </label>
+        <label htmlFor="note-content">
+          CONTEÚDO
+          <textarea
+            id="note-content"
+            maxLength="6000"
+            value={draft.content ?? ''}
+            onChange={(event) => update('content', event.target.value)}
+          />
+          <small>{String(draft.content ?? '').length}/6000</small>
+        </label>
+        <div>
+          <small role="status" aria-live="polite">
+            {status || 'Rascunho salvo somente neste dispositivo.'}
+          </small>
+          <button
+            type="button"
+            onClick={save}
+            disabled={busy === 'save' || !draft.title?.trim() || !draft.lesson_id}
+          >
+            {busy === 'save' ? 'SALVANDO...' : draft.id ? 'ATUALIZAR ANOTAÇÃO' : 'Salvar ANOTAÇÃO'}
+          </button>
+        </div>
+      </section>
+      <section className="notes-library" aria-labelledby="notes-library-title">
+        <header>
+          <div>
+            <small>Biblioteca pessoal</small>
+            <h2 id="notes-library-title">Registros desta formação</h2>
+          </div>
+          <label htmlFor="notes-search">
+            FILTRAR ANOTAÇÕES
+            <input
+              id="notes-search"
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Título, aula, módulo ou curso"
+            />
+          </label>
+        </header>
+        {filteredNotes.length ? (
+          <div className="notes-grid">
+            {filteredNotes.map((note) => {
+              const lesson = lessonById.get(note.lesson_id);
+              return (
+                <article className="note note-context" key={note.id}>
+                  <header>
+                    <span>
+                      <small>{lesson?.course?.title ?? 'Curso'}</small>
+                      <b>{lesson?.module?.title ?? 'Módulo'}</b>
+                    </span>
+                    <time dateTime={note.updated_at}>{formatDate(note.updated_at)}</time>
+                  </header>
+                  <h3>{note.title}</h3>
+                  <p>{note.content || 'Sem conteúdo adicional.'}</p>
+                  <footer>
+                    <span>{lesson?.title ?? 'Aula não disponível'}</span>
+                    <div>
+                      <button type="button" onClick={() => edit(note)} disabled={!!busy}>
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        className="danger-button"
+                        onClick={() => requestRemove(note)}
+                        disabled={!!busy}
+                      >
+                        {busy === note.id ? 'EXCLUINDO...' : 'EXCLUIR'}
+                      </button>
+                    </div>
+                  </footer>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <Empty
+            title={query ? 'Nenhuma anotação encontrada' : 'Nenhuma anotação nesta formação'}
+            description={
+              query
+                ? 'Altere o filtro para localizar outros registros.'
+                : 'Escolha uma aula acima e registre conceitos importantes.'
+            }
+            action={
+              query ? (
+                <button type="button" onClick={() => setQuery('')}>
+                  LIMPAR FILTRO
+                </button>
+              ) : null
+            }
+          />
+        )}
+      </section>
+      <ConfirmDialog
+        open={Boolean(pendingDelete)}
+        title="Excluir anotação?"
+        description={`A anotação “${pendingDelete?.title ?? ''}” será excluída permanentemente.`}
+        confirmLabel="Excluir anotação"
+        busy={Boolean(pendingDelete) && busy === pendingDelete.id}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={remove}
+      />
+    </Page>
+  );
+}
+
+export function Saved({ data, openLesson, refresh, academy }) {
+  const lessons = asArray(data.lessons),
+    favorites = asArray(data.favorites),
+    later = asArray(data.later),
+    [filter, setFilter] = useState('all'),
+    [busy, setBusy] = useState(''),
+    [message, setMessage] = useState(''),
+    favoriteById = new Map(favorites.map((item) => [item.lesson_id, item])),
+    laterById = new Map(later.map((item) => [item.lesson_id, item])),
+    items = lessons
+      .map((lesson) => {
+        const favorite = favoriteById.get(lesson.id),
+          watchLater = laterById.get(lesson.id),
+          dates = [validDate(favorite?.created_at), validDate(watchLater?.created_at)].filter(
+            Boolean,
+          );
+        return {
+          lesson,
+          favorite,
+          watchLater,
+          createdAt: dates.sort((x, y) => y - x)[0] ?? null,
+        };
+      })
+      .filter((item) => item.favorite || item.watchLater)
+      .filter(
+        (item) =>
+          filter === 'all' ||
+          (filter === 'favorites' && item.favorite) ||
+          (filter === 'later' && item.watchLater),
+      )
+      .sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0)),
+    counts = {
+      all: new Set([
+        ...favorites.map((item) => item.lesson_id),
+        ...later.map((item) => item.lesson_id),
+      ]).size,
+      favorites: favoriteById.size,
+      later: laterById.size,
+    };
+  async function remove(table, lessonId) {
+    if (busy) return;
+    setBusy(`${table}:${lessonId}`);
+    setMessage('');
+    try {
+      const response = await toggleSaved(table, lessonId, true);
+      setMessage(response.error ?? 'Item removido da lista.');
+      if (!response.error) await refresh(true);
+    } catch (error) {
+      reportClientError(error, { source: 'pages/Workspace.jsx' });
+      setMessage('Não foi possível atualizar os conteúdos salvos.');
+    } finally {
+      setBusy('');
+    }
+  }
+  const academyTitle = academyConfig[academy]?.title ?? 'AMEX HOUSE';
+  return (
+    <Page eyebrow={academyTitle} title="Conteúdos salvos">
+      <p className="saved-intro">
+        Favoritos e aulas para assistir depois pertencem somente a esta formação.
+      </p>
+      <section className="saved-toolbar" aria-label="Filtrar conteúdos salvos">
+        <div role="group" aria-label="Tipo de conteúdo salvo">
+          {[
+            ['all', 'Todos'],
+            ['favorites', 'Favoritos'],
+            ['later', 'Assistir depois'],
+          ].map(([value, label]) => (
+            <button
+              type="button"
+              key={value}
+              aria-pressed={filter === value}
+              onClick={() => setFilter(value)}
+            >
+              {label}
+              <b>{counts[value]}</b>
+            </button>
+          ))}
+        </div>
+        <p role="status" aria-live="polite">
+          {message || `${items.length} ${items.length === 1 ? 'aula visível' : 'aulas visíveis'}`}
+        </p>
+      </section>
+      {items.length ? (
+        <section className="saved-grid" aria-label="Aulas salvas">
+          {items.map(({ lesson, favorite, watchLater, createdAt }) => (
+            <article className="saved-card" key={lesson.id}>
+              <header>
+                <span>
+                  <small>{lesson.course?.title}</small>
+                  <b>{lesson.module?.title}</b>
+                </span>
+                <time dateTime={createdAt?.toISOString()}>
+                  {createdAt ? formatDate(createdAt) : 'Data não disponível'}
+                </time>
+              </header>
+              <h2>{lesson.title}</h2>
+              <p>{lesson.summary || 'Aula salva para consulta posterior.'}</p>
+              <div className="saved-tags">
+                {favorite && <span>Favorito</span>}
+                {watchLater && <span>Assistir depois</span>}
+              </div>
+              <footer>
+                <button type="button" className="primary" onClick={() => openLesson(lesson.id)}>
+                  Abrir aula
+                </button>
+                {favorite && (
+                  <button
+                    type="button"
+                    onClick={() => remove('favorites', lesson.id)}
+                    disabled={!!busy}
+                  >
+                    {busy === `favorites:${lesson.id}` ? 'Removendo...' : 'Remover favorito'}
+                  </button>
+                )}
+                {watchLater && (
+                  <button
+                    type="button"
+                    onClick={() => remove('watch_later', lesson.id)}
+                    disabled={!!busy}
+                  >
+                    {busy === `watch_later:${lesson.id}` ? 'Removendo...' : 'Remover da lista'}
+                  </button>
+                )}
+              </footer>
+            </article>
+          ))}
+        </section>
+      ) : (
+        <Empty
+          title={filter === 'all' ? 'Nenhum conteúdo salvo' : 'Nenhum item neste filtro'}
+          description={
+            filter === 'favorites'
+              ? 'Favorite aulas desta formação para encontrá-las aqui.'
+              : filter === 'later'
+                ? 'Adicione aulas à lista Assistir Depois para encontrá-las aqui.'
+                : 'Favorite aulas ou adicione conteúdos à lista para encontrá-los aqui.'
+          }
+          action={
+            filter !== 'all' ? (
+              <button type="button" onClick={() => setFilter('all')}>
+                Mostrar todos
+              </button>
+            ) : null
+          }
+        />
+      )}
+    </Page>
+  );
+}
+
+export function Progress({ data, academy }) {
+  const courses = asArray(data.courses),
+    modules = asArray(data.modules),
+    lessons = asArray(data.lessons),
+    progress = asArray(data.progress),
+    progressByLesson = new Map(progress.map((item) => [item.lesson_id, item])),
+    completedIds = new Set(
+      progress.filter((item) => item.status === 'completed').map((item) => item.lesson_id),
+    ),
+    done = lessons.filter((item) => completedIds.has(item.id)).length,
+    inProgress = lessons.filter(
+      (item) => progressByLesson.get(item.id)?.status === 'in_progress',
+    ).length,
+    hoursDone = lessons
+      .filter((item) => completedIds.has(item.id))
+      .reduce((sum, item) => sum + safeNumber(item.workload_hours), 0),
+    totalHours = lessons.reduce((sum, item) => sum + safeNumber(item.workload_hours), 0),
+    overall = safePercent(lessons.length ? (done / lessons.length) * 100 : 0),
+    academyTitle = academyConfig[academy]?.title ?? 'AMEX HOUSE',
+    courseRows = courses.map((course) => {
+      const courseModules = modules.filter((module) => module.course_id === course.id),
+        moduleIds = new Set(courseModules.map((module) => module.id)),
+        items = lessons.filter((lesson) => moduleIds.has(lesson.module_id)),
+        amount = items.filter((lesson) => completedIds.has(lesson.id)).length,
+        active = items.filter(
+          (lesson) => progressByLesson.get(lesson.id)?.status === 'in_progress',
+        ).length,
+        percent = safePercent(items.length ? (amount / items.length) * 100 : 0),
+        hours = items
+          .filter((lesson) => completedIds.has(lesson.id))
+          .reduce((sum, item) => sum + safeNumber(item.workload_hours), 0);
+      return {
+        course,
+        items,
+        amount,
+        active,
+        percent,
+        hours,
+        moduleCount: courseModules.length,
+      };
+    });
+  return (
+    <Page eyebrow={academyTitle} title="Seu progresso">
+      <section className="progress-summary" aria-labelledby="progress-summary-title">
+        <div>
+          <small>Progresso desta formação</small>
+          <h2 id="progress-summary-title">{overall}% concluído</h2>
+          <p>
+            {done} de {lessons.length} aulas · {hoursDone} de {totalHours} horas concluídas
+          </p>
+        </div>
+        <div
+          className="progress-summary-ring"
+          style={{ '--progress': `${overall}%` }}
+          role="img"
+          aria-label={`${overall}% da formação concluída`}
+        >
+          <b>{overall}%</b>
+        </div>
+      </section>
+      <div className="metrics progress-metrics">
+        <Metric value={`${hoursDone}H`} label="Horas concluídas" />
+        <Metric value={`${Math.max(0, totalHours - hoursDone)}H`} label="Horas restantes" />
+        <Metric value={done} label="Aulas concluídas" />
+        <Metric value={inProgress} label="Em andamento" />
+      </div>
+      <section className="progress-courses" aria-labelledby="progress-courses-title">
+        <header>
+          <div>
+            <small>Detalhamento</small>
+            <h2 id="progress-courses-title">Evolução por curso</h2>
+          </div>
+          <span>
+            {courses.length} {courses.length === 1 ? 'curso' : 'cursos'} em {academyTitle}
+          </span>
+        </header>
+        {courseRows.length ? (
+          <div className="progress-course-grid">
+            {courseRows.map(({ course, items, amount, active, percent, hours, moduleCount }) => (
+              <article className="progress-course-card" key={course.id}>
+                <div className="progress-course-top">
+                  <div>
+                    <h3>{course.title}</h3>
+                    <p>
+                      {moduleCount} módulos · {items.length} aulas ·{' '}
+                      {safeNumber(course.workload_hours)}H
+                    </p>
+                  </div>
+                  <b>{percent}%</b>
+                </div>
+                <div
+                  className="progress-course-track"
+                  role="progressbar"
+                  aria-label={
+                    items.length
+                      ? `Progresso em ${course.title}`
+                      : `${course.title} sem aulas publicadas`
+                  }
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  aria-valuenow={percent}
+                >
+                  <i style={{ width: `${percent}%` }} />
+                </div>
+                <dl className="progress-course-facts">
+                  <div>
+                    <dt>Concluídas</dt>
+                    <dd>
+                      {amount}/{items.length}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Em andamento</dt>
+                    <dd>{active}</dd>
+                  </div>
+                  <div>
+                    <dt>Horas feitas</dt>
+                    <dd>{hours}H</dd>
+                  </div>
+                </dl>
+                <small>
+                  {items.length === 0
+                    ? 'SEM AULAS PUBLICADAS'
+                    : percent === 100
+                      ? 'CURSO CONCLUÍDO'
+                      : active > 0 || amount > 0
+                        ? 'Em andamento'
+                        : 'NÃO INICIADO'}
+                </small>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <Empty
+            title="Nenhum curso disponível"
+            description="Não há cursos publicados nesta formação."
+          />
+        )}
+      </section>
+    </Page>
+  );
+}
+
+export function Activities({ data, openLesson, academy }) {
+  const lessons = asArray(data.lessons),
+    stored = asArray(data.activities),
+    derived = asArray(data.progress).map((item) => ({
+      id: `progress-${item.lesson_id}`,
+      activity_type: item.status === 'completed' ? 'lesson_completed' : 'lesson_progress',
+      reference_id: item.lesson_id,
+      created_at: item.updated_at,
+      description: item.status === 'completed' ? 'Aula concluída' : 'Progresso atualizado',
+    })),
+    source = [
+      ...new Map(
+        [...stored, ...derived].map((item) => [
+          `${item.activity_type}:${item.reference_id}:${item.created_at ?? ''}`,
+          item,
+        ]),
+      ).values(),
+    ],
+    [filter, setFilter] = useState('all'),
+    lessonById = new Map(lessons.map((lesson) => [lesson.id, lesson])),
+    normalized = source
+      .map((item) => {
+        const lesson = lessonById.get(item.reference_id),
+          date = validDate(item.created_at),
+          type =
+            item.activity_type === 'lesson_completed' || /conclu/i.test(item.description ?? '')
+              ? 'completed'
+              : 'progress';
+        return { ...item, lesson, date, type };
+      })
+      .filter((item) => item.date && item.lesson)
+      .sort((a, b) => b.date - a.date),
+    filtered = normalized.filter((item) => filter === 'all' || item.type === filter),
+    groups = filtered.reduce((map, item) => {
+      const key = item.date.toLocaleDateString('pt-BR', {
+          year: 'numeric',
+          month: 'long',
+          day: '2-digit',
+        }),
+        list = map.get(key) ?? [];
+      list.push(item);
+      map.set(key, list);
+      return map;
+    }, new Map()),
+    counts = {
+      all: normalized.length,
+      completed: normalized.filter((item) => item.type === 'completed').length,
+      progress: normalized.filter((item) => item.type === 'progress').length,
+    },
+    academyTitle = academyConfig[academy]?.title ?? 'AMEX HOUSE';
+  return (
+    <Page eyebrow={academyTitle} title="Histórico de atividades">
+      <p className="activities-intro">
+        A linha do tempo mostra apenas eventos vinculados às aulas desta formação.
+      </p>
+      <section className="activity-toolbar" aria-label="Filtrar histórico">
+        <div role="group" aria-label="Tipo de atividade">
+          {[
+            ['all', 'TODAS'],
+            ['completed', 'CONCLUSÕES'],
+            ['progress', 'Progresso'],
+          ].map(([value, label]) => (
+            <button
+              type="button"
+              key={value}
+              aria-pressed={filter === value}
+              onClick={() => setFilter(value)}
+            >
+              {label}
+              <b>{counts[value]}</b>
+            </button>
+          ))}
+        </div>
+        <span>
+          {filtered.length} {filtered.length === 1 ? 'evento' : 'eventos'}
+        </span>
+      </section>
+      {groups.size ? (
+        <section className="activity-timeline" aria-label="Linha do tempo acadêmica">
+          {[...groups.entries()].map(([date, items]) => (
+            <section className="activity-day" key={date}>
+              <header>
+                <time>{date}</time>
+                <span>
+                  {items.length} {items.length === 1 ? 'registro' : 'registros'}
+                </span>
+              </header>
+              <ol>
+                {items.map((item) => (
+                  <li key={item.id}>
+                    <span className={`activity-marker ${item.type}`} aria-hidden="true" />
+                    <article>
+                      <header>
+                        <span>
+                          {item.type === 'completed' ? 'AULA CONCLUÍDA' : 'PROGRESSO DE ESTUDO'}
+                        </span>
+                        <time dateTime={item.date.toISOString()}>
+                          {item.date.toLocaleTimeString('pt-BR', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </time>
+                      </header>
+                      <h2>{item.lesson.title}</h2>
+                      <p>
+                        {item.lesson.course?.title} · {item.lesson.module?.title}
+                      </p>
+                      <footer>
+                        <span>{item.description || 'Atividade acadêmica registrada'}</span>
+                        <button type="button" onClick={() => openLesson(item.lesson.id)}>
+                          Abrir aula →
+                        </button>
+                      </footer>
+                    </article>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ))}
+        </section>
+      ) : (
+        <Empty
+          title={filter === 'all' ? 'Nenhuma atividade registrada' : 'Nenhum evento neste filtro'}
+          description={
+            filter === 'all'
+              ? 'Seu histórico aparecerá conforme você avançar nas aulas desta formação.'
+              : 'Altere o filtro para visualizar outros eventos acadêmicos.'
+          }
+          action={
+            filter !== 'all' ? (
+              <button type="button" onClick={() => setFilter('all')}>
+                MOSTRAR TODAS
+              </button>
+            ) : null
+          }
+        />
+      )}
+    </Page>
+  );
+}
+
+export function Goals({ data, refresh = () => {}, academy }) {
+  const goalKey = `amex-goal:${academy || 'academy'}`,
+    storedGoal = safeNumber(storage.get(goalKey, data.goal?.weekly_minutes || '300'), 300),
+    initial = Math.min(10080, Math.max(30, storedGoal)),
+    [goal, setGoal] = useState(initial),
+    [status, setStatus] = useState(''),
+    [busy, setBusy] = useState(false),
+    lessons = asArray(data.lessons),
+    lessonIds = new Set(lessons.map((item) => item.id)),
+    weekStart = new Date();
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+  const recent = asArray(data.progress).filter(
+      (item) => lessonIds.has(item.lesson_id) && validDate(item.updated_at) >= weekStart,
+    ),
+    minutes = recent.reduce((sum, item) => {
+      const duration = safeNumber(item.video_duration_seconds),
+        percent = safePercent(item.video_percent);
+      return sum + Math.round(duration > 0 ? (duration * percent) / 100 / 60 : percent * 0.45);
+    }, 0),
+    pct = safePercent((minutes / Math.max(goal, 1)) * 100),
+    remaining = Math.max(0, goal - minutes),
+    academyTitle = academyConfig[academy]?.title ?? 'AMEX HOUSE';
+  useEffect(() => {
+    const local = safeNumber(storage.get(goalKey, ''), 0);
+    if (local >= 30) setGoal(Math.min(10080, local));
+  }, [goalKey]);
+  async function choose(value) {
+    if (busy) return;
+    const previous = goal;
+    setGoal(value);
+    setBusy(true);
+    setStatus('Salvando meta...');
+    const response = await saveStudyGoal(academy, value);
+    if (response.error) {
+      setGoal(previous);
+      setStatus(response.error);
+    } else {
+      storage.set(goalKey, String(value));
+      setStatus(`Meta de ${academyTitle} salva neste dispositivo.`);
+      refresh(true);
+    }
+    setBusy(false);
+  }
+  return (
+    <Page eyebrow={academyTitle} title="Meta semanal">
+      <p className="goals-intro">
+        O acompanhamento considera somente o progresso registrado nesta formação desde
+        segunda-feira.
+      </p>
+      <section
+        className="goal-weekly-dashboard"
+        aria-label={`Meta semanal em ${academyTitle}`}
+      >
+        <div className="goal-summary">
+          <div>
+            <small>Progresso da semana</small>
+            <b>
+              <MotionAnimatedNumber value={minutes} /> de {goal} min
+            </b>
+            <span>{remaining > 0 ? `${remaining} min restantes` : 'META ATINGIDA'}</span>
+          </div>
+          <strong><MotionAnimatedNumber value={pct} suffix="%" /></strong>
+        </div>
+        <ProgressBar
+          className="goal-track-component"
+          value={pct}
+          label={`Meta semanal em ${academyTitle}`}
+        />
+        <dl className="goal-weekly-facts">
+          <div>
+            <dt>Aulas com atividade</dt>
+            <dd>{recent.length}</dd>
+          </div>
+          <div>
+            <dt>Formação</dt>
+            <dd>{academyTitle}</dd>
+          </div>
+          <div>
+            <dt>Reinício</dt>
+            <dd>Segunda-feira</dd>
+          </div>
+        </dl>
+      </section>
+      <section className="goal-presets" aria-labelledby="goal-presets-title">
+        <header>
+          <small>Ritmo de estudo</small>
+          <h2 id="goal-presets-title">Escolha sua meta</h2>
+        </header>
+        <div>
+          {[
+            [120, 'LEVE', '2H por semana'],
+            [300, 'REGULAR', '5H por semana'],
+            [600, 'INTENSIVA', '10H por semana'],
+          ].map(([value, label, copy]) => (
+            <button
+              type="button"
+              disabled={busy}
+              aria-pressed={goal === value}
+              className={goal === value ? 'selected' : ''}
+              key={value}
+              onClick={() => choose(value)}
+            >
+              <b>{label}</b>
+              <span>{copy}</span>
+              <small>{Math.round(value / 5)} min por dia útil</small>
+            </button>
+          ))}
+        </div>
+      </section>
+      <p className="goal-status" role="status" aria-live="polite">
+        {status}
+      </p>
+    </Page>
+  );
+}
+
+export function Certificate({ session, data, academy }) {
+  const courses = asArray(data.courses),
+    modules = asArray(data.modules),
+    lessons = asArray(data.lessons),
+    progress = asArray(data.progress),
+    progressByLesson = new Map(progress.map((item) => [item.lesson_id, item]));
+  const requiredQuizIds = new Set(
+    asArray(data.quizRequirements)
+      .filter((item) => item.quiz_required === true)
+      .map((item) => item.lesson_id),
+  );
+  const courseStatus = courses.map((course) => {
+    const moduleIds = new Set(
+        modules.filter((module) => module.course_id === course.id).map((module) => module.id),
+      ),
+      items = lessons.filter((lesson) => moduleIds.has(lesson.module_id)),
+      requiredItems = items.filter((lesson) => requiredQuizIds.has(lesson.id)),
+      completed = items.filter(
+        (lesson) => progressByLesson.get(lesson.id)?.status === 'completed',
+      ).length,
+      quizPassed = requiredItems.filter(
+        (lesson) => progressByLesson.get(lesson.id)?.quiz_passed === true,
+      ).length;
+    return {
+      course,
+      items,
+      completed,
+      quizPassed,
+      requiredQuizCount: requiredItems.length,
+      lessonsReady: items.length > 0 && completed === items.length,
+      quizzesReady: requiredItems.every(
+        (lesson) => progressByLesson.get(lesson.id)?.quiz_passed === true,
+      ),
+    };
+  });
+  const requiredQuizLessons = lessons.filter((lesson) => requiredQuizIds.has(lesson.id)),
+    total = lessons.length,
+    done = lessons.filter(
+      (lesson) => progressByLesson.get(lesson.id)?.status === 'completed',
+    ).length,
+    passed = requiredQuizLessons.filter(
+      (lesson) => progressByLesson.get(lesson.id)?.quiz_passed === true,
+    ).length,
+    hours = lessons.reduce((sum, item) => sum + safeNumber(item.workload_hours), 0),
+    catalogReady = courses.length > 0 && total > 0,
+    coursesReady = catalogReady && courseStatus.every((item) => item.lessonsReady),
+    quizzesReady = catalogReady && courseStatus.every((item) => item.quizzesReady),
+    eligible = catalogReady && coursesReady && quizzesReady,
+    completionPercent = safePercent(total ? (done / total) * 100 : 0),
+    quizPercent = safePercent(requiredQuizLessons.length ? (passed / requiredQuizLessons.length) * 100 : 0),
+    academyTitle = academyConfig[academy]?.title ?? 'AMEX HOUSE',
+    student = session.user.user_metadata?.display_name ?? session.user.email;
+  return (
+    <Page eyebrow={academyTitle} title="Certificado da formação">
+      <section className="certificate-status">
+        <div className="certificate-status-copy">
+          <small>Elegibilidade</small>
+          <h2>{eligible ? 'Certificado disponível' : 'Conclusão em andamento'}</h2>
+          <p>
+            {eligible
+              ? 'Todos os requisitos acadêmicos desta formação foram atendidos.'
+              : 'O certificado será liberado quando todas as aulas e avaliações obrigatórias forem concluídas.'}
+          </p>
+          <div className="certificate-progress" aria-label={`Progresso para o certificado: ${completionPercent}%`}>
+            <span><b>{completionPercent}%</b><small>progresso acadêmico</small></span>
+            <i><u style={{ width: `${completionPercent}%` }} /></i>
+          </div>
+        </div>
+        <aside className="certificate-gate">
+          <span className={eligible ? 'eligible' : 'pending'}>{eligible ? 'LIBERADO' : 'PENDENTE'}</span>
+          <dl>
+            <div><dt>Aulas</dt><dd>{done}/{total}</dd></div>
+            <div><dt>Avaliações</dt><dd>{passed}/{requiredQuizLessons.length}</dd></div>
+            <div><dt>Aprovação</dt><dd>{quizPercent}%</dd></div>
+          </dl>
+        </aside>
+      </section>
+      <div className="metrics certificate-metrics">
+        <Metric value={`${done}/${total}`} label="Aulas concluídas" />
+        <Metric value={`${passed}/${requiredQuizLessons.length}`} label="Avaliações obrigatórias" />
+        <Metric value={courses.length} label={courses.length === 1 ? 'Curso' : 'Cursos'} />
+        <Metric value={`${hours}H`} label="Carga pelas aulas" />
+      </div>
+      <section
+        className="certificate-requirements"
+        aria-labelledby="certificate-requirements-title"
+      >
+        <header>
+          <small>CHECKLIST ACADÊMICO</small>
+          <h2 id="certificate-requirements-title">Requisitos por curso</h2>
+        </header>
+        {courseStatus.length ? (
+          <div>
+            {courseStatus.map(
+              ({
+                course,
+                items,
+                completed,
+                quizPassed,
+                requiredQuizCount,
+                lessonsReady,
+                quizzesReady,
+              }) => (
+                <article key={course.id}>
+                  <header>
+                    <div>
+                      <small>Curso</small>
+                      <h3>{course.title}</h3>
+                    </div>
+                    <b>{lessonsReady && quizzesReady ? 'CONCLUÍDO' : 'PENDENTE'}</b>
+                  </header>
+                  <dl>
+                    <div>
+                      <dt>Aulas</dt>
+                      <dd>
+                        {completed}/{items.length}
+                      </dd>
+                      <span className={lessonsReady ? 'ok' : 'pending'}>
+                        {lessonsReady ? 'OK' : 'PENDENTE'}
+                      </span>
+                    </div>
+                    <div>
+                      <dt>Avaliações</dt>
+                      <dd>
+                        {quizPassed}/{requiredQuizCount}
+                      </dd>
+                      <span className={quizzesReady ? 'ok' : 'pending'}>
+                        {quizzesReady ? 'OK' : 'PENDENTE'}
+                      </span>
+                    </div>
+                    <div>
+                      <dt>Carga</dt>
+                      <dd>
+                        {items.reduce((sum, item) => sum + safeNumber(item.workload_hours), 0)}H
+                      </dd>
+                      <span>Pelas aulas</span>
+                    </div>
+                  </dl>
+                </article>
+              ),
+            )}
+          </div>
+        ) : (
+          <Empty
+            title="Nenhum curso publicado"
+            description="O certificado depende de uma formação publicada com aulas válidas."
+          />
+        )}
+      </section>
+      {eligible ? (
+        <section className="certificate certificate-document" aria-label="Prévia do certificado">
+          <small>AMEX HOUSE · {academyTitle.toUpperCase()}</small>
+          <h2>Certificado de conclusão</h2>
+          <p>Certificamos que</p>
+          <strong>{student}</strong>
+          <p>
+            concluiu integralmente a formação <b>{academyTitle}</b>, com carga acadêmica de{' '}
+            <b>{hours} horas</b>.
+          </p>
+          <footer>
+            <span>VALIDAÇÃO ACADÊMICA INTERNA</span>
+            <span>
+              {courses.length} {courses.length === 1 ? 'Curso' : 'Cursos'} · {total} AULAS
+            </span>
+          </footer>
+          <p className="certificate-disclaimer">
+            Documento acadêmico demonstrativo. A emissão verificável e o código antifraude devem ser
+            implementados no servidor antes do uso oficial.
+          </p>
+        </section>
+      ) : (
+        <Empty
+          title="Certificado ainda indisponível"
+          description={`Progresso atual nesta formação: ${done}/${total} aulas concluídas e ${passed}/${requiredQuizLessons.length} avaliações obrigatórias aprovadas.`}
+        />
+      )}
+    </Page>
+  );
+}
