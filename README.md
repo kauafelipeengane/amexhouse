@@ -5,6 +5,7 @@ Plataforma web acadêmica para as formações AMEX Pentest e AMEX Python, com au
 ## Autor
 
 Kauã Felipe Engane
+Jose eduardo Honório
 
 ## Disciplina
 
