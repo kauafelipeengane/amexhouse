@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+const auth=readFileSync(new URL('../src/components/auth.css',import.meta.url),'utf8');
+const courses=readFileSync(new URL('../src/pages/Courses.jsx',import.meta.url),'utf8');
+const css=readFileSync(new URL('../src/styles/rigorous-rebuild.css',import.meta.url),'utf8');
+const notifications=readFileSync(new URL('../src/components/NotificationCenter.jsx',import.meta.url),'utf8');
+test('login nao usa largura estreita nem rolagem interna',()=>{assert.match(auth,/width: min\(1180px, 100%\)/);assert.match(auth,/grid-template-columns: minmax\(0, 1\.08fr\) minmax\(420px, \.92fr\)/);assert.doesNotMatch(auth,/overflow:\s*auto/);});
+test('indice do curso tem largura intrinseca e nao usa 3D',()=>{assert.doesNotMatch(courses,/CardContainer|CardBody/);assert.match(css,/grid-template-columns: max-content minmax\(0, 1fr\)/);assert.match(css,/min-width: 2\.2ch/);assert.match(css,/letter-spacing: 0/);});
+test('notificacao abre em portal superior',()=>{assert.match(notifications,/createPortal\(/);assert.match(css,/z-index: 2147483000/);});
