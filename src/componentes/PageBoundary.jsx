@@ -1,0 +1,41 @@
+import React, { Component, Suspense } from 'react';
+import { Loading } from './ui';
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: false };
+  }
+  static getDerivedStateFromError() {
+    return { error: true };
+  }
+  componentDidUpdate(previous) {
+    if (previous.resetKey !== this.props.resetKey && this.state.error)
+      this.setState({ error: false });
+  }
+  render() {
+    if (this.state.error)
+      return (
+        <section className="page-error" role="alert">
+          <small>Não foi possível exibir esta área</small>
+          <h1>Esta área não pôde ser exibida</h1>
+          <p>Recarregue a página. Se o problema continuar, volte ao Portal AMEX.</p>
+          <div>
+            <button type="button" onClick={() => location.reload()}>
+              RECARREGAR
+            </button>
+            <button type="button" onClick={() => (location.hash = '#/portal')}>
+              Voltar ao portal
+            </button>
+          </div>
+        </section>
+      );
+    return this.props.children;
+  }
+}
+export function PageBoundary({ children, resetKey }) {
+  return (
+    <ErrorBoundary resetKey={resetKey}>
+      <Suspense fallback={<Loading />}>{children}</Suspense>
+    </ErrorBoundary>
+  );
+}
