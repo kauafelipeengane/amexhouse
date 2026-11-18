@@ -1,0 +1,60 @@
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join, extname, relative } from "node:path";
+const root = new URL("..", import.meta.url).pathname,
+  files = [];
+function walk(dir) {
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name);
+    if (["node_modules", "dist", ".git", "supabase"].includes(name)) continue;
+    statSync(path).isDirectory() ? walk(path) : files.push(path);
+  }
+}
+walk(root);
+const source = files.filter(
+    (f) =>
+      [".js", ".jsx", ".json", ".html", ".css", ".example"].includes(
+        extname(f),
+      ) &&
+      !f.includes("/tests/") &&
+      !f.includes("/docs/") &&
+      !f.includes("/scripts/"),
+  ),
+  entries = source.map((path) => ({ path, text: readFileSync(path, "utf8") })),
+  joined = entries.map((x) => x.text).join("\n");
+const forbidden = [
+  ["sb", "secret", ""].join("_"),
+  ["service", "role"].join("_"),
+  "dangerouslySetInnerHTML",
+  "document.write(",
+  "eval(",
+  "new Function(",
+  "debugger",
+];
+for (const token of forbidden)
+  if (joined.includes(token)) throw new Error(`Token proibido: ${token}`);
+for (const { path, text } of entries) {
+  if (
+    [".jsx", ".html"].includes(extname(path)) &&
+    /target=["']_blank["']/.test(text) &&
+    !text.includes("noopener")
+  )
+    throw new Error(`Link externo sem noopener: ${relative(root, path)}`);
+  if (/console\.(log|debug)\(/.test(text))
+    throw new Error(`Console de depuração: ${relative(root, path)}`);
+}
+for (const path of [
+  "src/components/Auth.jsx",
+  "src/components/AuthField.jsx",
+  "src/components/auth.css",
+  "src/App.jsx",
+  "src/services/platform.js",
+  "src/lib/env.js",
+  "src/lib/security.js",
+])
+  if (!files.some((f) => f.endsWith(path)))
+    throw new Error(`Arquivo ausente: ${path}`);
+if (files.some((f) => f.endsWith(".sql")))
+  throw new Error("SQL não deve estar no front-end");
+console.log(
+  `[OK] ${files.length} arquivos auditados; ${forbidden.length} padrões críticos verificados`,
+);
