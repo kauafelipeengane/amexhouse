@@ -1,0 +1,104 @@
+import { academyConfig } from '../lib/academy';
+import React, { useMemo } from 'react';
+import { Empty } from './ui';
+import { normalizeSearch } from '../lib/search';
+function Highlight({ text = '', query = '' }) {
+  const source = String(text),
+    terms = normalizeSearch(query)
+      .split(' ')
+      .filter((term) => term.length > 1);
+  if (!terms.length) return source;
+  const escaped = terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'),
+    regex = new RegExp(`(${escaped})`, 'ig'),
+    parts = source.split(regex);
+  return parts.map((part, index) =>
+    terms.includes(normalizeSearch(part)) ? (
+      <mark key={`${part}-${index}`}>{part}</mark>
+    ) : (
+      <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>
+    ),
+  );
+}
+export function SearchResults({ query = '', results = [], onOpen, onClear, academy }) {
+  const term = String(query).trim(),
+    groups = useMemo(() => {
+      const map = new Map();
+      for (const lesson of results) {
+        const id = lesson.course?.id ?? 'course',
+          entry = map.get(id) ?? {
+            course: lesson.course?.title ?? 'Curso',
+            lessons: [],
+          };
+        entry.lessons.push(lesson);
+        map.set(id, entry);
+      }
+      return [...map.values()];
+    }, [results]),
+    academyTitle = academyConfig[academy]?.title ?? 'AMEX HOUSE';
+  return (
+    <section className="search-results" aria-labelledby="search-title">
+      <header className="search-results-header">
+        <div>
+          <small>BUSCA EM {academyTitle.toUpperCase()}</small>
+          <h1 id="search-title">Resultados</h1>
+          <p>
+            <b>{results.length}</b> {results.length === 1 ? 'aula encontrada' : 'aulas encontradas'}{' '}
+            para “{term}”.
+          </p>
+        </div>
+        <button type="button" onClick={onClear}>
+          LIMPAR BUSCA
+        </button>
+      </header>
+      {groups.length ? (
+        <div className="search-groups">
+          {groups.map((group) => (
+            <section key={group.course}>
+              <header>
+                <small>Curso</small>
+                <h2>{group.course}</h2>
+                <span>
+                  {group.lessons.length} {group.lessons.length === 1 ? 'resultado' : 'resultados'}
+                </span>
+              </header>
+              <ol className="search-result-list">
+                {group.lessons.map((lesson, index) => (
+                  <li key={lesson.id}>
+                    <button type="button" onClick={() => onOpen(lesson.id)}>
+                      <span className="result-index">{String(index + 1).padStart(2, '0')}</span>
+                      <span>
+                        <b>
+                          <Highlight text={lesson.title} query={term} />
+                        </b>
+                        <small>
+                          <Highlight text={lesson.module?.title ?? 'Módulo'} query={term} />
+                          {lesson.summary && (
+                            <>
+                              {' '}
+                              · <Highlight text={lesson.summary} query={term} />
+                            </>
+                          )}
+                        </small>
+                      </span>
+                      <i aria-hidden="true">↗</i>
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ))}
+        </div>
+      ) : (
+        <Empty
+          title="Nenhuma aula encontrada"
+          description={`Não há resultados em ${academyTitle}. Tente usar o nome de uma aula, módulo ou curso.`}
+          action={
+            <button type="button" onClick={onClear}>
+              VOLTAR À PÁGINA
+            </button>
+          }
+        />
+      )}
+    </section>
+  );
+}

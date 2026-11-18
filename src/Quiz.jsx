@@ -1,0 +1,400 @@
+import { reportClientError } from '../lib/errorReporter';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { asArray, storage, safeNumber, safePercent } from '../lib/utils';
+import { loadQuiz, submitQuiz } from '../services/platform';
+import { ConfirmDialog } from './ConfirmDialog';
+import { QuizResultDialog } from './QuizResultDialog';
+
+const draftKey = (academy, id) => `amex-quiz:${academy || 'academy'}:${id}`;
+const validDraft = (value, questions) => {
+  const ids = new Set(questions.map((q) => String(q.id))),
+    result = {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return result;
+  for (const [key, raw] of Object.entries(value)) {
+    if (!ids.has(String(key))) continue;
+    const answer = asArray(raw)
+      .slice(0, 1)
+      .filter((item) => typeof item === 'string' || typeof item === 'number');
+    if (answer.length) result[key] = answer;
+  }
+  return result;
+};
+export function Quiz({ lesson, academy }) {
+  const [quiz, setQuiz] = useState(null),
+    [answers, setAnswers] = useState({}),
+    [state, setState] = useState('loading'),
+    [result, setResult] = useState(null),
+    [attempt, setAttempt] = useState(1),
+    [retry, setRetry] = useState(0),
+    [reviewOpen, setReviewOpen] = useState(false),
+    [draftStatus, setDraftStatus] = useState(''),
+    [currentQuestion, setCurrentQuestion] = useState(''),
+    [confirmClear, setConfirmClear] = useState(false),
+    headingRef = useRef(null),
+    submitRef = useRef(null);
+  useEffect(() => {
+    let active = true;
+    setQuiz(null);
+    setResult(null);
+    setAttempt(1);
+    setAnswers({});
+    setReviewOpen(false);
+    setCurrentQuestion('');
+    setState('loading');
+    loadQuiz(lesson.id)
+      .then((response) => {
+        if (!active) return;
+        if (response.error) {
+          setResult({ ok: false, message: response.error, quiz_id: null });
+          setState('error');
+          return;
+        }
+        const next = response.data,
+          questions = asArray(next?.questions);
+        setQuiz(next);
+        if (!questions.length) {
+          setState('empty');
+          return;
+        }
+        let stored = {};
+        try {
+          stored = JSON.parse(storage.get(draftKey(academy, lesson.id), '{}'));
+        } catch (error) {
+          reportClientError(error, { source: 'components/Quiz.jsx' });
+        }
+        setAnswers(validDraft(stored, questions));
+        setCurrentQuestion(String(questions[0]?.id ?? ''));
+        setState('ready');
+      })
+      .catch(() => {
+        if (active) {
+          setResult({
+            ok: false,
+            message: 'Não foi possível carregar a avaliação.',
+            quiz_id: null,
+          });
+          setState('error');
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [academy, lesson.id, retry]);
+  const questions = useMemo(() => asArray(quiz?.questions), [quiz]),
+    visibleResult = result?.quiz_id === quiz?.id ? result : null,
+    answered = questions.filter((question) => asArray(answers[question.id]).length).length,
+    remaining = Math.max(0, questions.length - answered),
+    complete = questions.length > 0 && remaining === 0,
+    progress = safePercent(questions.length ? (answered / questions.length) * 100 : 0),
+    score = safePercent(visibleResult?.score),
+    passing = safePercent(quiz?.passing_score),
+    unanswered = questions.filter((question) => !asArray(answers[question.id]).length);
+  useEffect(() => {
+    if (state === 'ready') headingRef.current?.focus();
+  }, [state, retry]);
+  useEffect(() => {
+    if (reviewOpen) requestAnimationFrame(() => submitRef.current?.focus());
+  }, [reviewOpen]);
+  function choose(questionId, optionId) {
+    if (state === 'submitting') return;
+    const next = { ...answers, [questionId]: [optionId] };
+    setAnswers(next);
+    const saved = storage.set(draftKey(academy, lesson.id), JSON.stringify(next));
+    setDraftStatus(
+      saved
+        ? 'Rascunho salvo neste dispositivo.'
+        : 'Não foi possível salvar o rascunho neste dispositivo.',
+    );
+    setResult(null);
+    setReviewOpen(false);
+  }
+  function goToQuestion(id) {
+    setCurrentQuestion(String(id));
+    const target = [...document.querySelectorAll('[data-question-id]')].find(
+      (node) => node.dataset.questionId === String(id),
+    );
+    target?.scrollIntoView({
+      behavior:
+        typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+          ? 'auto'
+          : 'smooth',
+      block: 'start',
+    });
+    target?.querySelector('input:not(:disabled)')?.focus();
+  }
+  function review() {
+    if (!complete) {
+      goToQuestion(unanswered[0]?.id);
+      return;
+    }
+    setReviewOpen(true);
+  }
+  function clearDraft() {
+    if (!Object.keys(answers).length) return;
+    setConfirmClear(true);
+  }
+  function confirmClearDraft() {
+    setAnswers({});
+    setResult(null);
+    setReviewOpen(false);
+    storage.remove(draftKey(academy, lesson.id));
+    setDraftStatus('Respostas removidas.');
+    setConfirmClear(false);
+  }
+  async function submit() {
+    if (!complete || state === 'submitting') return;
+    const submittedQuizId = quiz.id;
+    setState('submitting');
+    setResult(null);
+    try {
+      const response = await submitQuiz(quiz.attempt_token, answers);
+      if (response.error)
+        setResult({
+          ok: false,
+          message: response.error,
+          quiz_id: submittedQuizId,
+        });
+      else {
+        setResult({ ...response.data, quiz_id: submittedQuizId });
+        setAttempt((value) => value + 1);
+        storage.remove(draftKey(academy, lesson.id));
+        setDraftStatus('Avaliação corrigida. O rascunho foi removido.');
+      }
+    } catch (error) {
+      reportClientError(error, { source: 'components/Quiz.jsx' });
+      setResult({
+        ok: false,
+        message: 'Não foi possível concluir a correção. Tente novamente.',
+        quiz_id: submittedQuizId,
+      });
+    } finally {
+      setState('ready');
+      setReviewOpen(false);
+      requestAnimationFrame(() => headingRef.current?.focus());
+    }
+  }
+  if (state === 'loading')
+    return (
+      <section className="quiz quiz-loading" aria-busy="true" aria-label="Carregando avaliação">
+        <span className="sr-only">Carregando avaliação</span>
+        <h2>Avaliação</h2>
+        <div />
+        <div />
+        <div />
+      </section>
+    );
+  if (state === 'error')
+    return (
+      <section className="quiz quiz-error" role="alert">
+        <h2>Não foi possível carregar a avaliação</h2>
+        <p>{result?.message}</p>
+        <button
+          type="button"
+          onClick={() => {
+            setResult(null);
+            setRetry((value) => value + 1);
+          }}
+        >
+          Tentar novamente
+        </button>
+      </section>
+    );
+  if (state === 'empty')
+    return (
+      <section className="quiz">
+        <header className="quiz-header">
+          <div>
+            <small>Avaliação</small>
+            <h2>Conteúdo em preparação</h2>
+          </div>
+        </header>
+        <p className="quiz-empty-copy">A avaliação desta aula ainda não foi publicada.</p>
+      </section>
+    );
+  return (
+    <section className="quiz" aria-labelledby={`quiz-title-${quiz.id}`}>
+      <header className="quiz-header">
+        <div>
+          <small>Avaliação da aula</small>
+          <h2 id={`quiz-title-${quiz.id}`} ref={headingRef} tabIndex="-1">
+            {quiz.title}
+          </h2>
+          <p>
+            Tentativa local {attempt} · aprovação em {passing}%
+          </p>
+        </div>
+        {visibleResult?.ok && (
+          <div
+            className={visibleResult.passed ? 'quiz-score passed' : 'quiz-score'}
+            aria-label={`Resultado: ${score} por cento. ${visibleResult.passed ? 'Aprovado' : 'Revisar'}`}
+          >
+            <b>{score}%</b>
+            <span>{visibleResult.passed ? 'APROVADO' : 'REVISAR'}</span>
+          </div>
+        )}
+      </header>
+      <div className="quiz-overview">
+        <div>
+          <span>
+            {answered} de {questions.length} respondidas
+          </span>
+          <b>{progress}%</b>
+        </div>
+        <div
+          className="quiz-progress"
+          role="progressbar"
+          aria-label="Progresso da avaliação"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow={progress}
+        >
+          <i style={{ width: `${progress}%` }} />
+        </div>
+        <nav aria-label="Ir para questão">
+          {questions.map((question, index) => {
+            const done = asArray(answers[question.id]).length > 0,
+              current = currentQuestion === String(question.id);
+            return (
+              <button
+                type="button"
+                key={question.id}
+                className={`${done ? 'answered ' : ''}${current ? 'current' : ''}`.trim()}
+                aria-current={current ? 'step' : undefined}
+                aria-label={`Questão ${index + 1}${current ? ', atual' : ''}${done ? ', respondida' : ', não respondida'}`}
+                onClick={() => goToQuestion(question.id)}
+              >
+                <span>{index + 1}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+      <div className="quiz-toolbar">
+        <p role="status" aria-live="polite">
+          {draftStatus || 'As respostas ficam salvas apenas neste dispositivo até o envio.'}
+        </p>
+        <button
+          type="button"
+          className="quiz-clear"
+          disabled={!answered || state === 'submitting'}
+          onClick={clearDraft}
+        >
+          LIMPAR RESPOSTAS
+        </button>
+      </div>
+      {questions.map((question, index) => {
+        const detail = asArray(visibleResult?.feedback).find(
+            (item) => item.question_id === question.id,
+          ),
+          description = detail ? `feedback-${question.id}` : undefined;
+        return (
+          <fieldset
+            data-question-id={question.id}
+            aria-describedby={description}
+            className={
+              detail ? (detail.correct ? 'question correct' : 'question incorrect') : 'question'
+            }
+            key={question.id}
+          >
+            <legend>
+              <span>{String(index + 1).padStart(2, '0')}</span>
+              <b>{question.prompt}</b>
+            </legend>
+            <div className="alternatives">
+              {asArray(question.alternatives).map((option) => {
+                const selected = answers[question.id]?.includes(option.id) || false;
+                return (
+                  <label className={selected ? 'selected' : ''} key={option.id}>
+                    <input
+                      type="radio"
+                      name={`quiz-${quiz.id}-question-${question.id}`}
+                      checked={selected}
+                      disabled={state === 'submitting'}
+                      onFocus={() => setCurrentQuestion(String(question.id))}
+                      onChange={() => choose(question.id, option.id)}
+                    />
+                    <span>{option.text}</span>
+                  </label>
+                );
+              })}
+            </div>
+            {detail && (
+              <p id={description} className="question-feedback" aria-live="polite">
+                <b>{detail.correct ? 'Resposta correta' : 'Revise esta questão'}</b>
+                <span>{detail.explanation}</span>
+              </p>
+            )}
+          </fieldset>
+        );
+      })}
+      {reviewOpen && (
+        <section className="quiz-review" aria-labelledby="quiz-review-title">
+          <small>Revise antes de enviar</small>
+          <h3 id="quiz-review-title">Confira suas respostas</h3>
+          <p>
+            As {questions.length} questões foram respondidas. Depois do envio, a avaliação será
+            corrigida.
+          </p>
+          <div>
+            <button type="button" onClick={() => setReviewOpen(false)}>
+              VOLTAR ÀS QUESTÕES
+            </button>
+            <button
+              ref={submitRef}
+              type="button"
+              className="quiz-submit"
+              disabled={state === 'submitting'}
+              onClick={submit}
+            >
+              {state === 'submitting' ? 'CORRIGINDO...' : 'CONFIRMAR E CORRIGIR'}
+            </button>
+          </div>
+        </section>
+      )}
+      <footer className="quiz-footer">
+        <span aria-live="polite">
+          {visibleResult && !visibleResult.ok
+            ? visibleResult.message
+            : visibleResult?.ok
+              ? visibleResult.passed
+                ? 'Avaliação concluída com aprovação.'
+                : 'Avaliação concluída. Revise as questões indicadas.'
+              : complete
+                ? 'Todas as questões respondidas. Revise antes de enviar.'
+                : `Responda mais ${remaining} ${remaining === 1 ? 'questão' : 'questões'} para continuar.`}
+        </span>
+        <button
+          type="button"
+          className="quiz-submit"
+          disabled={state === 'submitting'}
+          onClick={review}
+        >
+          {state === 'submitting'
+            ? 'CORRIGINDO...'
+            : complete
+              ? 'REVISAR E ENVIAR'
+              : `IR PARA QUESTÃO ${questions.indexOf(unanswered[0]) + 1}`}
+        </button>
+      </footer>
+      <QuizResultDialog
+        key={`${quiz.id}-${visibleResult?.attempt_number ?? 'pending'}`}
+        result={visibleResult?.ok && !visibleResult.dialogDismissed ? visibleResult : null}
+        onClose={() =>
+          setResult((current) => (current ? { ...current, dialogDismissed: true } : current))
+        }
+        onReview={() => {
+          setResult((current) => (current ? { ...current, dialogDismissed: true } : current));
+          requestAnimationFrame(() => goToQuestion(questions[0]?.id));
+        }}
+      />
+      <ConfirmDialog
+        open={confirmClear}
+        title="Limpar respostas?"
+        description="Todas as respostas salvas nesta tentativa serão removidas. Esta ação não altera tentativas já enviadas."
+        confirmLabel="Limpar respostas"
+        onCancel={() => setConfirmClear(false)}
+        onConfirm={confirmClearDraft}
+      />
+    </section>
+  );
+}
