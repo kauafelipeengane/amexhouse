@@ -1,2 +1,0 @@
--- Substituido pela migracao consolidada AMEX_HOUSE_V1_0_1.sql
--- Nao execute este arquivo.
