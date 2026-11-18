@@ -1,0 +1,3 @@
+-- MIGRAÇÃO SUPERADA.
+-- Não execute este arquivo. Use AMEX_HOUSE_V1_8_0_AVALIACOES_TECNICAS.sql após a base V1.7.4.
+-- A V1.8.0 substitui questões mecânicas por bancos técnicos e mantém conteúdo já curado.
