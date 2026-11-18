@@ -1,0 +1,15 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+select plan(10);
+select has_table('public','profiles','profiles existe');
+select has_table('public','study_goals','study_goals existe');
+select has_table('public','lesson_progress','lesson_progress existe');
+select has_table('public','quiz_attempts','quiz_attempts existe');
+select has_function('public','handle_new_user',array[]::text[],'trigger de perfil existe');
+select has_function('public','amex_save_study_goal',array['text','integer'],'RPC de meta existe');
+select has_function('public','amex_submit_quiz',array['uuid','jsonb'],'RPC de quiz existe');
+select has_index('public','study_goals','study_goals_user_academy_uidx','meta tem índice único');
+select has_index('public','lesson_progress','lesson_progress_user_lesson_uidx','progresso tem índice único');
+select has_index('public','quiz_attempts','quiz_attempts_user_quiz_number_uidx','tentativa tem índice único');
+select * from finish();
+rollback;
