@@ -1,3 +1,0 @@
-Product: AMEX HOUSE V1.20.0
-Version: 1.20.0
-Branch: main
