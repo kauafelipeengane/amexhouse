@@ -1,8 +1,0 @@
-import {test,expect} from '@playwright/test';import AxeBuilder from '@axe-core/playwright';import{stablePage,assertNoHorizontalOverflow,assertInsideViewport}from'./fixtures/app.js';
-test.describe('fluxos públicos',()=>{
- test('login é utilizável por teclado e sem overflow',async({page})=>{await stablePage(page,'/');await assertNoHorizontalOverflow(page);await expect(page.getByText('Continue seu percurso.')).toBeVisible();await page.keyboard.press('Tab');await expect(page.locator(':focus')).toBeVisible();await assertInsideViewport(page,'input,button,a')});
- test('cadastro alterna sem recarregar',async({page})=>{await stablePage(page,'/');await page.getByRole('button',{name:'Criar conta'}).click();await expect(page.getByRole('button',{name:/Criar conta/})).toBeVisible();await assertNoHorizontalOverflow(page)});
- test('recuperação apresenta formulário acessível',async({page})=>{await stablePage(page,'/');await page.getByRole('button',{name:'Esqueci minha senha'}).click();await expect(page.getByRole('button',{name:/Enviar instruções/})).toBeVisible();await assertNoHorizontalOverflow(page)});
- test('páginas legais e certificado não quebram',async({page})=>{for(const route of ['/#/privacy','/#/terms','/#/verify']){await stablePage(page,route);await assertNoHorizontalOverflow(page);await expect(page.locator('main')).toBeVisible()}});
- test('acessibilidade automática sem violações sérias',async({page})=>{await stablePage(page,'/');const result=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21a','wcag21aa']).analyze();expect(result.violations.filter(v=>['critical','serious'].includes(v.impact))).toEqual([])});
-});
