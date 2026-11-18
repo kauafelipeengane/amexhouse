@@ -1,0 +1,44 @@
+{
+  "name": "amex-house",
+  "private": true,
+  "version": "1.33.4",
+  "type": "module",
+  "engines": {
+    "node": "22.x",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run audit && npm run security:audit && npm run check:production && npm run check:final && node ./node_modules/vite/bin/vite.js build && node scripts/check-build.mjs",
+    "preview": "vite preview",
+    "audit": "node scripts/audit.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check:production": "node scripts/check-production.mjs",
+    "check:final": "node scripts/final-check.mjs",
+    "check:repository": "node scripts/check-repository.mjs",
+    "security:audit": "node scripts/security-audit.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:desktop": "playwright test --project=desktop-chromium",
+    "test:e2e:mobile": "playwright test --project=mobile-chromium",
+    "test:visual": "playwright test e2e/visual.spec.js",
+    "test:visual:update": "playwright test e2e/visual.spec.js --update-snapshots",
+    "test:e2e:report": "playwright show-report",
+    "audit:source": "node scripts/source-hygiene-audit.mjs",
+    "audit:animation": "node scripts/animated-assets-audit.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.57.4",
+    "react": "19.2.1",
+    "react-dom": "19.2.1",
+    "vite": "8.0.16",
+    "motion": "^12.23.24",
+    "lucide-react": "^0.468.0",
+    "@radix-ui/react-progress": "^1.1.7",
+    "@radix-ui/react-collapsible": "^1.1.12"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.0-alpha-2026-11-03",
+    "@axe-core/playwright": "4.14.0",
+    "axe-core": "4.11.0"
+  }
+}
